@@ -1,7 +1,8 @@
 """The episode DAG: each stage's class, pool, and dependencies, and one episode's units of work.
 
 Episodes are split into pieces when they are first read. Segment, inpaint, depth, and render run per piece;
-the action stages run per episode; composite merges the pieces into one video and curate runs on that.
+the action stages run per episode; composite merges the pieces into one video. Annotate is a parallel CPU
+branch that reads the source video, curate writes L1/L2, and vlm_audit adds L3 plus the final decision.
 """
 
 from __future__ import annotations
@@ -13,8 +14,10 @@ from typing import NamedTuple
 from egowhale.action.approach import Approach
 from egowhale.action.base_ik import BaseIK
 from egowhale.action.retarget import Retarget
+from egowhale.annotate import Annotate
 from egowhale.pieces import piece_dir, plan
 from egowhale.quality.curate import Curate
+from egowhale.quality.vlm_audit import VlmAudit
 from egowhale.step import Step
 from egowhale.visual.composite import Composite
 from egowhale.visual.depth import Depth
@@ -35,6 +38,7 @@ class Stage(NamedTuple):
 # In this order, ready units of one episode are handed out. Only inpaint waits inside the visual branch;
 # everything meets at composite.
 STAGES = {
+    "annotate": Stage(Annotate, "vlm"),
     "retarget": Stage(Retarget, "action"),
     "segment": Stage(Segment, "segment"),
     "base_ik": Stage(BaseIK, "action", ("retarget",)),
@@ -44,6 +48,7 @@ STAGES = {
     "render": Stage(Render, "render", ("retarget", "base_ik", "approach")),
     "composite": Stage(Composite, "cpu", ("segment", "inpaint", "depth", "approach", "render")),
     "curate": Stage(Curate, "cpu", ("composite",)),
+    "vlm_audit": Stage(VlmAudit, "vlm", ("curate", "annotate")),
 }
 DEPS = {name: stage.deps for name, stage in STAGES.items()}
 POOL = {name: stage.pool for name, stage in STAGES.items()}

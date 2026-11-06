@@ -33,6 +33,7 @@ def pools_from(cfg: dict) -> tuple[dict[str, int], dict[str, float]]:
         "depth": nodes["depth"]["cards"],
         "action": actors,
         "cpu": nodes["cpu"]["actors"],
+        "vlm": nodes["vlm"]["actors"],
         "render": nodes["render"]["actors"],
         # Readers and writers are handed out per visual lane, in VISUAL order.
         "feed": visual * readers,
@@ -101,7 +102,7 @@ def plan_memory(cfg: dict, pools: dict[str, int], height: int, width: int) -> li
     # Composite holds a piece of background, render, scene depth, robot depth, masks at full and half size, and the output.
     rows.append(("composite", pools["cpu"] * piece * (half * (3 + 3 + 1 + 1 + 4 + 4 + 1) + height * width) / 2**30))
     gpu_workers = sum(pools[name] for name in GPU_POOLS)
-    cpu_workers = sum(pools[name] for name in ("render", "cpu", "feed", "write", "action_read", "action_write"))
+    cpu_workers = sum(pools[name] for name in ("render", "cpu", "vlm", "feed", "write", "action_read", "action_write"))
     rows.append(("worker processes", gpu_workers * GPU_WORKER_GB + cpu_workers * CPU_WORKER_GB))
     return rows
 

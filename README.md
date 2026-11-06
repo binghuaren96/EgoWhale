@@ -28,19 +28,21 @@ EgoWhale takes in egocentric manipulation video and writes out dual-arm robot de
 | Approach | TrajOpt from the zero configuration to the first end-effector pose | `action/prefix.npz` |
 | Render | MuJoCo render of the arm from the action outputs | `visual/render.npz` |
 | Composite | Paste the render; gripper hidden where the scene is closer | `visual/composite.mp4` |
-| Curate | Frame checks, action statistics, then a VLM audit | `action/quality.json` |
+| Annotate | Coarse episode summary and/or subtasks (VLM, runs beside the GPU chain) | `annotation/coarse.json` |
+| Curate | Frame checks and action statistics (L1/L2 only) | `action/quality.json` |
+| VLM Audit | L3 consistency check, then the final keep decision | `action/vlm_audit.json`, `action/final.json` |
 
-A finished stage is skipped when every file in its output column exists. Delete those files to rerun it. Each stage is one `egowhale.step.Step` subclass with `needs`, `makes`, and a GPU share; its docstring describes the methods batch mode adds.
+A finished stage is skipped when every file in its output column exists. Delete those files to rerun it. Each stage is one `egowhale.step.Step` subclass with `needs`, `makes`, and a GPU share; its docstring describes the methods batch mode adds. `Annotate` reads the source video, not the synthesized outputs, so it can start at the same time as retarget and segmentation.
 
 ## Quick start
 
 An episode is an EgoDex HDF5 file with a sibling `.mp4` of the same length. Python 3.12 is required. Rendering uses MuJoCo EGL, which the package sets before MuJoCo is imported.
 
 ```bash
-python -m egowhale path/to/episode.hdf5 [out_dir] [--steps NAME ...] [--inpaint-model sttn|propainter]
+python -m egowhale path/to/episode.hdf5 [out_dir] [--steps NAME ...] [--inpaint-model sttn|propainter] [--annotate-mode off|description|subtasks|both]
 ```
 
-When `out_dir` is omitted, files are written to `outputs/<parent>/<stem>/`. `--steps` runs only the named stages.
+When `out_dir` is omitted, files are written to `outputs/<parent>/<stem>/`. `--steps` runs only the named stages. `--annotate-mode` defaults to `both` when `annotate` is selected explicitly; a batch config defaults to `off`.
 
 Model weights stay local:
 
@@ -72,7 +74,9 @@ scripts/<stage>.sh path/to/episode.hdf5 [out_dir]
 | `scripts/base_ik.sh` | gripper | `action/base.json`, `action/ik.npz` |
 | `scripts/approach.sh` | IK | `action/prefix.npz` |
 | `scripts/composite.sh` | gripper, inpaint, depth, masks, base, IK, approach | `visual/render.npz`, `visual/composite.mp4` |
+| `scripts/annotate.sh` | source `.mp4` and HDF5 attributes | `annotation/coarse.json` |
 | `scripts/curate.sh` | gripper, base, IK, approach, composite | `action/quality.json` |
+| `scripts/vlm_audit.sh` | quality, composite, optional annotation | `action/vlm_audit.json`, `action/final.json` |
 
 Each script is `python -m egowhale ... --steps <stage>`. Upstream stages are not rerun. A missing input raises `FileNotFoundError`.
 
@@ -86,13 +90,39 @@ A config in `cfgs/` lists only what it changes from `DEFAULTS` in `egowhale/conf
 
 ## Configuration
 
-The VLM audit in Curate (`egowhale/quality/vlm.py`) calls a Qwen model when a key is present. Without one, or when the call fails, the audit is reported as skipped or errored and the episode is not failed for it.
+`Annotate` and `VlmAudit` share one OpenAI-compatible client. L1/L2 in `Curate` never calls the network, so a missing key or API outage does not block the deterministic quality report.
 
 | Variable | Role | Default |
 | --- | --- | --- |
-| `EGOWHALE_VLM_API_KEY` | Bearer token. Unset skips the audit. | |
+| `EGOWHALE_VLM_API_KEY` | Bearer token. Unset skips annotation and audit. | |
 | `EGOWHALE_VLM_BASE_URL` | OpenAI-compatible chat endpoint | DashScope compatible API |
-| `EGOWHALE_VLM_MODEL` | Model name | `qwen3.8-flash` |
+| `EGOWHALE_VLM_MODEL` | Model name; set this to the model available in your Bailian console | unset |
+
+Batch config keys:
+
+```yaml
+vlm:
+  model: qwen-vl-plus        # replace with the actual Bailian model id
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  api_key_env: EGOWHALE_VLM_API_KEY
+  retries: 2
+  cache: true
+
+annotate:
+  mode: off                  # off | description | subtasks | both
+  sample_fps: 1.0
+  max_frames: 24
+  max_subtasks: 8
+  min_subtask_frames: 15
+
+audit:
+  enabled: true
+  fail_open: true            # keep when the audit itself is unavailable
+```
+
+`fail_open: true` keeps an episode when the audit is skipped or errored, and records the reason in `final.json`; only an explicit `is_consistent: false` drops it. Set `fail_open: false` to drop episodes whose audit could not run.
+
+See `docs/vlm_design.md` for the full data contracts and failure semantics.
 
 ## Layout
 
@@ -104,10 +134,13 @@ egowhale/media.py     video, mask, and depth files; working scale and frame rate
 egowhale/robot.py     ARX assets, joint names, MuJoCo scene helpers
 egowhale/thirdparty.py  imports from thirdparty/
 egowhale/action/      retarget, base search, approach
+egowhale/annotate/    coarse episode summary and subtasks
 egowhale/visual/      segmentation, inpaint (STTN, ProPainter), depth, render, composite
-egowhale/quality/     curation: frame checks, action statistics, VLM audit
+egowhale/quality/     frame checks, action statistics, L3 audit, final decision
+egowhale/vlm/         provider client, prompts, sampling, cache, schemas
 egowhale/batch/       Ray launcher
 cfgs/                 batch configs
+docs/                 VLM data contracts and failure semantics
 scripts/              one shell entry per stage, batch and benchmark launchers
 tests/                pytest; no GPU needed except the retarget check
 tools/                inpaint benchmarks and output comparison

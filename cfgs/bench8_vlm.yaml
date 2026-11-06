@@ -1,0 +1,65 @@
+# 8-GPU layout with coarse annotation and the L3 audit.
+# The VLM pool uses CPU/network only; it does not take a card away from the visual or action pools.
+# Set EGOWHALE_VLM_API_KEY and EGOWHALE_VLM_MODEL before the run, or replace `vlm.model` below.
+name: bench8_vlm
+episodes: outputs/len1000.txt
+out: outputs
+piece_frames: 600
+
+vlm:
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  # Replace with the model id shown in your Bailian console.
+  model: qwen-vl-plus
+  api_key_env: EGOWHALE_VLM_API_KEY
+  timeout_s: 120
+  # Free-tier Bailian allows few requests per second; 429s are common, so keep retries generous.
+  retries: 3
+  backoff_s: 2.0
+  cache: true
+
+annotate:
+  mode: both
+  sample_fps: 1.0
+  max_frames: 24
+  max_subtasks: 8
+  min_subtask_frames: 15
+  prompt_version: coarse_v1
+  on_error: keep
+
+audit:
+  enabled: true
+  sample_fps: 4.0
+  # If the provider rejects the request for too many images, lower this before touching anything else.
+  max_frames: 96
+  prompt_version: audit_v1
+  fail_open: true
+  scope: episode
+
+nodes:
+  segment: {cards: 3, actors_per_card: 2}
+  inpaint: {cards: 2, model: sttn}
+  depth: {cards: 3, window: 1, frames_per_forward: 96}
+  action: {ride: depth, actors_per_card: 1, gpu_share: 0.1}
+  render: {actors: 4}
+  cpu: {actors: 8}
+  # Two actors to start: the free tier rate-limits hard, and each actor calls the API synchronously.
+  # Raise this once 429s are rare, not before.
+  vlm: {actors: 2}
+
+io:
+  readers_per_lane: 2
+  queue_per_lane: 4
+  queue_frames: 1200
+  cpus:
+    cpu: 1
+    render: 1
+    feed: 2
+    write: 1
+    action_read: 1
+    action_write: 1
+    vlm: 1
+
+memory:
+  inflight: 64
+  reserve_gb: 64
+  object_store_gb: 120

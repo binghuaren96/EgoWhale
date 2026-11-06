@@ -45,6 +45,36 @@ DEFAULTS = {
         "render": {"actors": 4},
         # Composite and curate actors.
         "cpu": {"actors": 8},
+        # Coarse annotation and L3 audit; these actors make network calls, not GPU work.
+        "vlm": {"actors": 4},
+    },
+    # Provider settings shared by annotate and vlm_audit. The key is never read from this file.
+    "vlm": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "",
+        "api_key_env": "EGOWHALE_VLM_API_KEY",
+        "timeout_s": 120,
+        "retries": 2,
+        "backoff_s": 2.0,
+        "cache": True,
+    },
+    "annotate": {
+        # off keeps batch runs from calling the API by default; a config that wants coarse labels sets this.
+        "mode": "off",
+        "sample_fps": 1.0,
+        "max_frames": 24,
+        "max_subtasks": 8,
+        "min_subtask_frames": 15,
+        "prompt_version": "coarse_v1",
+        "on_error": "keep",
+    },
+    "audit": {
+        "enabled": True,
+        "sample_fps": 4.0,
+        "max_frames": 96,
+        "prompt_version": "audit_v1",
+        "fail_open": True,
+        "scope": "episode",
     },
     "io": {
         # CPU decoders for each visual GPU actor.
@@ -54,7 +84,7 @@ DEFAULTS = {
         # Frames one visual GPU actor may hold across those pieces. One piece always fits.
         "queue_frames": 1200,
         # CPUs each actor reserves for its whole life. Ray queues actors silently when they do not fit.
-        "cpus": {"cpu": 1, "render": 1, "feed": 2, "write": 1, "action_read": 1, "action_write": 1},
+        "cpus": {"cpu": 1, "render": 1, "feed": 2, "write": 1, "action_read": 1, "action_write": 1, "vlm": 1},
     },
     "memory": {
         # Episodes open at once. Open episodes cost disk, not RAM; this only sets how far fast nodes run ahead.
@@ -86,6 +116,23 @@ def load(path: Path | str, **overrides) -> dict:
         raise ConfigError(f"{path}: nodes.action.ride must be inpaint, depth, or empty")
     if action["ride"] and action["actors_per_card"] * action["gpu_share"] >= 1:
         raise ConfigError(f"{path}: riding action actors would take the whole card")
+    if config["annotate"]["mode"] not in ("off", "description", "subtasks", "both"):
+        raise ConfigError(f"{path}: annotate.mode must be off, description, subtasks, or both")
+    if config["annotate"]["on_error"] not in ("keep", "fail"):
+        raise ConfigError(f"{path}: annotate.on_error must be keep or fail")
+    for key in ("sample_fps", "max_frames", "max_subtasks", "min_subtask_frames"):
+        if float(config["annotate"][key]) <= 0:
+            raise ConfigError(f"{path}: annotate.{key} must be positive")
+    if config["audit"]["scope"] != "episode":
+        raise ConfigError(f"{path}: audit.scope must be episode")
+    if float(config["audit"]["sample_fps"]) <= 0 or int(config["audit"]["max_frames"]) <= 0:
+        raise ConfigError(f"{path}: audit.sample_fps and audit.max_frames must be positive")
+    if int(config["vlm"]["retries"]) < 0 or float(config["vlm"]["timeout_s"]) <= 0:
+        raise ConfigError(f"{path}: vlm.retries must be >= 0 and vlm.timeout_s must be positive")
+    if not config["vlm"]["api_key_env"]:
+        raise ConfigError(f"{path}: vlm.api_key_env must name an environment variable")
+    if int(config["nodes"]["vlm"]["actors"]) < 1:
+        raise ConfigError(f"{path}: nodes.vlm.actors must be at least 1")
     config["out"] = str(_resolve(config["out"]) / config["name"])
     config["source"] = str(path.resolve())
     return config

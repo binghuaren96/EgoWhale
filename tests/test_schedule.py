@@ -156,7 +156,7 @@ def simulate(count: int, pools: dict[str, int], inflight: int, pieces: int = 1, 
     raise RuntimeError("scheduler did not finish")
 
 
-POOLS = {"action": 1, "segment": 1, "inpaint": 1, "depth": 1, "render": 1, "cpu": 2}
+POOLS = {"action": 1, "segment": 1, "inpaint": 1, "depth": 1, "render": 1, "cpu": 2, "vlm": 1}
 
 
 def _order_respects_deps(trace, pieces):
@@ -197,7 +197,19 @@ def test_every_stage_has_a_pool():
 
 
 def test_stage_table_derives_the_old_constants():
-    assert list(DEPS) == ["retarget", "segment", "base_ik", "inpaint", "approach", "depth", "render", "composite", "curate"]
+    assert list(DEPS) == [
+        "annotate",
+        "retarget",
+        "segment",
+        "base_ik",
+        "inpaint",
+        "approach",
+        "depth",
+        "render",
+        "composite",
+        "curate",
+        "vlm_audit",
+    ]
     assert PIECED == ("segment", "inpaint", "depth", "render")
     assert VISUAL == ("segment", "inpaint", "depth")
     assert {name for name, stage in STAGES.items() if stage.pool == "action"} == {"retarget", "base_ik", "approach"}

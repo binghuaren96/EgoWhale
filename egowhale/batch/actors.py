@@ -112,10 +112,17 @@ class _Runner(_Cpu):
 class CpuActor(_Runner):
     stages = ("composite", "curate")
 
-    def __init__(self):
-        # Batch runs do not call the VLM.
-        os.environ.pop("EGOWHALE_VLM_API_KEY", None)
-        super().__init__()
+
+class VlmActor(_Runner):
+    """Coarse annotation and L3 audit; network-bound, so it never holds a GPU."""
+
+    stages = ("annotate", "vlm_audit")
+
+    def __init__(self, config: dict):
+        self.steps = {
+            "annotate": STEPS["annotate"](config),
+            "vlm_audit": STEPS["vlm_audit"](config),
+        }
 
 
 class RenderActor(_Runner):
@@ -178,6 +185,7 @@ POOLS = {
     "depth": (DepthActor, lambda cpus: {"num_gpus": 1, "max_concurrency": 2}, True),
     "action": (ActionActor, lambda cpus: {"num_gpus": 1, "max_concurrency": 1}, False),
     "cpu": (CpuActor, lambda cpus: {"num_cpus": cpus["cpu"], "max_concurrency": 1}, False),
+    "vlm": (VlmActor, lambda cpus: {"num_cpus": cpus["vlm"], "max_concurrency": 1}, "config"),
     "render": (RenderActor, lambda cpus: {"num_cpus": cpus["render"], "max_concurrency": 1}, False),
     "feed": (FeedActor, lambda cpus: {"num_cpus": cpus["feed"], "max_concurrency": 8}, True),
     "write": (StoreActor, lambda cpus: {"num_cpus": cpus["write"], "max_concurrency": 1}, True),
@@ -186,7 +194,14 @@ POOLS = {
 }
 
 
-def make_actors(pools: dict[str, int], share: dict[str, float], cpus: dict[str, int], window: int, inpaint_model: str):
+def make_actors(
+    pools: dict[str, int],
+    share: dict[str, float],
+    cpus: dict[str, int],
+    window: int,
+    inpaint_model: str,
+    config: dict,
+):
     """Every pool's actors as (label, handle). `share` is the GPU fraction for pools that stack on one card."""
     import ray
 
@@ -198,7 +213,12 @@ def make_actors(pools: dict[str, int], share: dict[str, float], cpus: dict[str, 
             remote = ray.remote(**options(cpus))(cls)
             if name in share:
                 remote = remote.options(num_gpus=share[name])
-            args = (inpaint_model, window) if configured else ()
+            if configured == "config":
+                args = (config,)
+            elif configured:
+                args = (inpaint_model, window)
+            else:
+                args = ()
             made[name] = [(f"{name}{index}", remote.remote(*args)) for index in range(pools[name])]
 
     # Whole cards are placed before fractional ones so a shared card cannot take a slot a whole actor needs.

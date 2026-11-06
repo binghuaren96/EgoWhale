@@ -10,7 +10,7 @@ from typing import Any
 
 from egowhale.batch.actors import make_actors
 from egowhale.batch.dag import POOL, STEPS, VISUAL, Job, take
-from egowhale.batch.report import Report, boot, logger
+from egowhale.batch.report import Report, boot, logger, summarize
 from egowhale.batch.resources import INFLIGHT, available_gb, preflight
 from egowhale.media import frame_size
 from egowhale.step import Result, short_error
@@ -367,7 +367,7 @@ def serve(jobs: list[Job], cfg: dict, pools: dict[str, int], share: dict[str, fl
     preflight(cfg, pools, share, height, width)
     journal = logger()
     model = cfg["nodes"]["inpaint"]["model"]
-    free = make_actors(pools, share, cfg["io"]["cpus"], cfg["nodes"]["depth"]["window"], model)
+    free = make_actors(pools, share, cfg["io"]["cpus"], cfg["nodes"]["depth"]["window"], model, cfg)
     boot(free, journal, pools, {"inpaint": LABELS[model]})
     # Render and curate draw with EGL on the action cards, which cuRobo leaves mostly idle.
     cards = sorted({device.split(":")[-1] for device in ray.get([actor.ready.remote() for _label, actor in free["action"]])})
@@ -377,4 +377,7 @@ def serve(jobs: list[Job], cfg: dict, pools: dict[str, int], share: dict[str, fl
     journal.info(f"{len(jobs)} episodes, {len(split)} split into {sum(len(job.spans) for job in split)} pieces    out {out}")
     report = Report(out, {name: pools[POOL[name]] for name in STEPS})
     journal.info(f"tensorboard --logdir {report.board}")
-    Scheduler(jobs, cfg, free, report).run()
+    try:
+        Scheduler(jobs, cfg, free, report).run()
+    finally:
+        summarize(jobs, journal)

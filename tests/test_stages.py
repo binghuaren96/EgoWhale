@@ -24,6 +24,9 @@ def _config(tmp_path, text: str) -> Path:
 def test_config_fills_defaults_and_resolves_out(tmp_path):
     cfg = config.load(_config(tmp_path, "name: probe\n"))
     assert cfg["nodes"]["inpaint"] == {"cards": 1, "model": "sttn"}
+    assert cfg["nodes"]["vlm"] == {"actors": 4}
+    assert cfg["annotate"]["mode"] == "off"
+    assert cfg["audit"]["fail_open"] is True
     assert cfg["out"] == str(paths.ROOT / "outputs" / "probe")
 
 
@@ -34,6 +37,8 @@ def test_config_fills_defaults_and_resolves_out(tmp_path):
         ("nodes:\n  action: {ride: segment}\n", "nodes.action.ride"),
         ("nodes:\n  action: {ride: depth, actors_per_card: 10, gpu_share: 0.1}\n", "whole card"),
         ("nodes:\n  inpaint: {cardz: 1}\n", "unknown config key nodes.inpaint.cardz"),
+        ("annotate:\n  mode: everything\n", "annotate.mode"),
+        ("audit:\n  scope: subtask\n", "audit.scope"),
     ],
 )
 def test_config_errors_are_exceptions_not_exits(tmp_path, text, message):

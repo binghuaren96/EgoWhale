@@ -21,6 +21,9 @@ PREFIX = "action/prefix.npz"
 RENDER = "visual/render.npz"
 COMPOSITE = "visual/composite.mp4"
 QUALITY = "action/quality.json"
+ANNOTATION = "annotation/coarse.json"
+VLM_AUDIT = "action/vlm_audit.json"
+FINAL = "action/final.json"
 PIECES = "pieces.json"
 PER_PIECE = (MASKS, INPAINT, DEPTH, RENDER)
 

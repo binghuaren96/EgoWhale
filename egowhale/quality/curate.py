@@ -1,4 +1,8 @@
-"""The curate stage: the three quality levels on one episode, written to action/quality.json."""
+"""The curate stage: deterministic L1/L2 checks, written to action/quality.json.
+
+The third level lives in `vlm_audit.py`, after this file has produced its evidence. Curate never
+calls the network and never needs EGOWHALE_VLM_API_KEY.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +13,9 @@ import numpy as np
 
 from egowhale.media import frame_size, video_shape
 from egowhale.paths import BASE, COMPOSITE, GRIPPER, IK, PREFIX, QUALITY
-from egowhale.quality import actions, checks, vlm
+from egowhale.quality import actions, checks
 from egowhale.step import Step
+from egowhale.vlm.metadata import description_and_source
 
 # An episode whose dropped share of frames is above this is not kept, and is not sent to the VLM.
 DROP_RATIO = 0.60
@@ -53,14 +58,17 @@ class Curate(Step):
         kept = l1 & ~outlier & ~sudden
         invalid_ratio = float((~kept).mean())
         keep = invalid_ratio <= DROP_RATIO
-        description = vlm.description(Path(src))
+        description, description_source = description_and_source(Path(src), default="manipulation")
         approach = len(np.load(dst / PREFIX)["qpos"]) - 1
-        audit = vlm.audit(dst / COMPOSITE, approach, frames, fps, description) if keep else {"status": "skipped", "reason": "dropped before audit"}
-        if audit.get("is_consistent") is False:
-            keep = False
         report = {
+            "keep_l1_l2": keep,
+            # Kept as an alias so older scripts that read `keep` continue to work.
             "keep": keep,
+            "frames": frames,
+            "fps": fps,
+            "approach": approach,
             "description": description,
+            "description_source": description_source,
             "invalid_ratio": invalid_ratio,
             "mean_ik_error_m": _finite_mean(signals["ik_error"]),
             "hand": _bits(signals["hand"]),
@@ -73,12 +81,11 @@ class Curate(Step):
             "outlier": _bits(outlier),
             "sudden": _bits(sudden),
             "valid": _bits(kept),
-            "vlm": audit,
         }
         path = dst / QUALITY
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2))
-        print(f"  keep {int(kept.sum())}/{frames}  invalid {invalid_ratio:.1%}  vlm {audit['status']}")
+        print(f"  keep {int(kept.sum())}/{frames}  invalid {invalid_ratio:.1%}")
 
 
 def _finite_mean(values: np.ndarray) -> float | None:

@@ -43,7 +43,13 @@ def test_outliers_and_sudden_flag_a_single_jump():
 
 def test_verdict_reads_json_inside_text_and_tolerates_garbage():
     reply = 'Sure. {"is consistent": false, "confidence": 0.8, "reasoning": "wrong object"} done'
-    assert vlm._verdict(reply) == {"status": "ok", "is_consistent": False, "confidence": 0.8, "reasoning": "wrong object"}
+    assert vlm._verdict(reply) == {
+        "status": "ok",
+        "is_consistent": False,
+        "confidence": 0.8,
+        "reasoning": "wrong object",
+        "mismatches": [],
+    }
     assert vlm._verdict("no json here")["status"] == "error"
     assert vlm._verdict("{not: json}")["status"] == "error"
 

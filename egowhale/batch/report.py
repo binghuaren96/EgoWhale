@@ -11,6 +11,7 @@ import numpy as np
 
 from egowhale.batch.dag import STEPS, Job
 from egowhale.batch.resources import available_gb, total_gb
+from egowhale.paths import FINAL
 from egowhale.step import short_error
 
 # (pool, display name, category, model or role)
@@ -22,6 +23,7 @@ PLACED = (
     ("render", "Render", "Action", "MuJoCo"),
     ("cpu", "Composite", "CPU", "paste"),
     ("cpu", "Curate", "CPU", "checks"),
+    ("vlm", "VLM", "CPU", "Qwen"),
     ("feed", "Feed", "IO", "prefetch"),
     ("write", "Write", "IO", "store"),
     ("action_read", "Action-Read", "IO", "prefetch"),
@@ -178,6 +180,9 @@ class Report:
             "pieces": len(job.spans),
             "seconds": round(time.perf_counter() - job.started, 2),
         }
+        decision = _decision(job)
+        if decision:
+            row["decision"] = decision
         self.meter.finish(job)
         self.meter.write(self.writer, force=True)
         if row["ok"] and job.watch:
@@ -193,6 +198,23 @@ class Report:
         self.meter.write(self.writer, force=True)
         self.writer.flush()
         self.writer.close()
+
+
+def _decision(job: Job) -> str:
+    """The episode's final decision, when it got as far as writing action/final.json."""
+    try:
+        return str(json.loads((job.dst / FINAL).read_text()).get("decision") or "")
+    except (OSError, ValueError):
+        return ""
+
+
+def summarize(jobs: list[Job], log) -> None:
+    """One line of how the whole batch was decided, so L3 needs no grep over final.json files."""
+    counts: dict[str, int] = {}
+    for job in jobs:
+        decision = _decision(job) or ("failed" if job.failed else "no_final")
+        counts[decision] = counts.get(decision, 0) + 1
+    log.info("decisions: " + ", ".join(f"{name} {count}" for name, count in sorted(counts.items())))
 
 
 def _compare(job: Job, writer) -> None:

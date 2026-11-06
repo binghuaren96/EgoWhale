@@ -221,5 +221,6 @@ __marimo__/
 
 *.pyc
 outputs/
+vlm_cache/
 thirdparty/
 datasets/
